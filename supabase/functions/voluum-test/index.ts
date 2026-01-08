@@ -38,15 +38,65 @@ serve(async (req) => {
       );
     }
 
-    // Test connection by fetching user/account info
-    // Using the /user endpoint which is lightweight
+    // Parse the access key - it might be in format "accessKeyId:accessKey" or just the token
+    let authToken = voluumAccessKey;
+    
+    // Check if the key contains a colon (accessKeyId:accessKey format)
+    if (voluumAccessKey.includes(':')) {
+      const [accessKeyId, accessKeySecret] = voluumAccessKey.split(':');
+      console.log('[voluum-test] Detected accessKeyId:accessKey format, authenticating...');
+      
+      // Authenticate to get session token
+      const authUrl = `${voluumBaseUrl}/auth/access/session`;
+      console.log('[voluum-test] Auth URL:', authUrl);
+      
+      const authResponse = await fetch(authUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({
+          accessKeyId: accessKeyId.trim(),
+          accessKey: accessKeySecret.trim()
+        })
+      });
+
+      console.log('[voluum-test] Auth response status:', authResponse.status);
+
+      if (!authResponse.ok) {
+        const errorText = await authResponse.text();
+        console.error('[voluum-test] Auth error:', errorText);
+        
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: 'Authentication failed',
+            message: 'Could not authenticate with Voluum API',
+            details: errorText,
+            help: 'Check that your Access Key ID and Access Key are correct. Format should be: accessKeyId:accessKey',
+            status: authResponse.status
+          }),
+          { 
+            status: 200, 
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+          }
+        );
+      }
+
+      const authData = await authResponse.json();
+      authToken = authData.token;
+      console.log('[voluum-test] Got session token successfully');
+    }
+
+    // Test connection by fetching user info
     const testUrl = `${voluumBaseUrl}/user`;
     console.log('[voluum-test] Testing URL:', testUrl);
 
     const response = await fetch(testUrl, {
       method: 'GET',
       headers: {
-        [voluumAuthHeader]: voluumAccessKey,
+        [voluumAuthHeader]: authToken,
         'Content-Type': 'application/json',
         'Accept': 'application/json'
       }
@@ -62,8 +112,8 @@ serve(async (req) => {
       let help = '';
 
       if (response.status === 401) {
-        errorMessage = 'Authentication failed - Invalid access key';
-        help = 'Check that your VOLUUM_ACCESS_KEY is correct and not expired';
+        errorMessage = 'Authentication failed - Invalid or expired token';
+        help = 'Check that your VOLUUM_ACCESS_KEY is correct. Format: accessKeyId:accessKey';
       } else if (response.status === 403) {
         errorMessage = 'Access forbidden - Check API permissions';
         help = 'Ensure your Voluum API key has the required permissions';
