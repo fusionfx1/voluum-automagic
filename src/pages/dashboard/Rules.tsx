@@ -138,7 +138,7 @@ export default function Rules() {
   });
 
   const createMutation = useMutation({
-    mutationFn: async (rule: Partial<Rule>) => {
+    mutationFn: async (rule: { name: string; cooldown_minutes: number; conditions: Json; actions: Json; is_enabled: boolean }) => {
       const { data, error } = await supabase
         .from('rules')
         .insert([rule])
@@ -160,14 +160,13 @@ export default function Rules() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: async ({ id, ...updates }: Partial<Rule> & { id: string }) => {
+    mutationFn: async ({ id, name, cooldown_minutes, conditions, actions, is_enabled }: { id: string; name: string; cooldown_minutes: number; conditions: Json; actions: Json; is_enabled: boolean }) => {
       const { data, error } = await supabase
         .from('rules')
-        .update(updates)
+        .update({ name, cooldown_minutes, conditions, actions, is_enabled })
         .eq('id', id)
         .select()
         .single();
-      
       if (error) throw error;
       return data;
     },
