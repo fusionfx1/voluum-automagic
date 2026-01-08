@@ -11,6 +11,7 @@ import Overview from "./pages/dashboard/Overview";
 import Campaigns from "./pages/dashboard/Campaigns";
 import Triggers from "./pages/dashboard/Triggers";
 import Rules from "./pages/dashboard/Rules";
+import SettingsPage from "./pages/dashboard/Settings";
 import NotFound from "./pages/NotFound";
 import { Loader2 } from "lucide-react";
 
@@ -71,6 +72,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <Rules />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dashboard/settings"
+        element={
+          <ProtectedRoute>
+            <SettingsPage />
           </ProtectedRoute>
         }
       />

@@ -19,6 +19,7 @@ const navigation = [
   { name: 'Campaigns', href: '/dashboard/campaigns', icon: Target },
   { name: 'Triggers', href: '/dashboard/triggers', icon: Zap },
   { name: 'Rules', href: '/dashboard/rules', icon: Settings },
+  { name: 'Settings', href: '/dashboard/settings', icon: Activity },
 ];
 
 export function DashboardLayout({ children }: { children: React.ReactNode }) {
