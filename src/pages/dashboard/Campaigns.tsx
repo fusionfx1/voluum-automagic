@@ -2,17 +2,18 @@ import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { StatusBadge } from '@/components/dashboard/StatusBadge';
+import { LastSyncedBadge } from '@/components/dashboard/LastSyncedBadge';
+import { CampaignFilters, StatusFilter } from '@/components/dashboard/CampaignFilters';
+import { MetricsTrendChart } from '@/components/dashboard/MetricsTrendChart';
 import { 
-  Search, 
   ArrowUpDown, 
   Target,
   RefreshCw,
   Download
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow, format } from 'date-fns';
 import { toast } from 'sonner';
 
 interface Campaign {
@@ -34,6 +35,7 @@ interface MetricsSnapshot {
   roi: number;
   epc: number;
   cvr: number;
+  created_at?: string;
 }
 
 type SortField = 'name' | 'profit' | 'roi' | 'clicks' | 'conversions';
@@ -41,6 +43,9 @@ type SortDirection = 'asc' | 'desc';
 
 export default function Campaigns() {
   const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [profitFilter, setProfitFilter] = useState<'all' | 'positive' | 'negative'>('all');
+  const [roiFilter, setRoiFilter] = useState<'all' | 'positive' | 'negative'>('all');
   const [sortField, setSortField] = useState<SortField>('profit');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [syncing, setSyncing] = useState(false);
@@ -60,6 +65,7 @@ export default function Campaigns() {
         toast.success(`Synced ${data.campaignsCount} campaigns, ${data.snapshotsInserted} snapshots`);
         queryClient.invalidateQueries({ queryKey: ['campaigns'] });
         queryClient.invalidateQueries({ queryKey: ['aggregated-metrics'] });
+        queryClient.invalidateQueries({ queryKey: ['metrics-snapshots-campaigns'] });
       } else {
         toast.error(data?.error || 'Sync failed');
       }
@@ -72,7 +78,7 @@ export default function Campaigns() {
 
   const { data: campaigns, isLoading: loadingCampaigns } = useQuery({
     queryKey: ['campaigns'],
-    refetchInterval: 5 * 60 * 1000, // Auto-refresh every 5 minutes
+    refetchInterval: 5 * 60 * 1000,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('campaigns')
@@ -84,18 +90,30 @@ export default function Campaigns() {
     },
   });
 
+  const { data: metricsSnapshots, isLoading: loadingSnapshots } = useQuery({
+    queryKey: ['metrics-snapshots-campaigns'],
+    refetchInterval: 5 * 60 * 1000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('metrics_snapshots')
+        .select('voluum_campaign_id, clicks, conversions, cost, revenue, profit, created_at')
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      return data as MetricsSnapshot[];
+    },
+  });
+
   const { data: aggregatedMetrics, isLoading: loadingMetrics } = useQuery({
     queryKey: ['aggregated-metrics'],
-    refetchInterval: 5 * 60 * 1000, // Auto-refresh every 5 minutes
+    refetchInterval: 5 * 60 * 1000,
     queryFn: async () => {
-      // Get all snapshots and aggregate by campaign
       const { data, error } = await supabase
         .from('metrics_snapshots')
         .select('voluum_campaign_id, clicks, conversions, cost, revenue, profit');
       
       if (error) throw error;
       
-      // Aggregate metrics per campaign
       const metricsByCampaign = new Map<string, MetricsSnapshot>();
       for (const snapshot of data) {
         const campaignId = snapshot.voluum_campaign_id;
@@ -122,7 +140,6 @@ export default function Campaigns() {
         }
       }
       
-      // Calculate derived metrics
       for (const [, metrics] of metricsByCampaign) {
         metrics.roi = metrics.cost > 0 ? ((metrics.revenue - metrics.cost) / metrics.cost) * 100 : 0;
         metrics.epc = metrics.clicks > 0 ? metrics.revenue / metrics.clicks : 0;
@@ -132,6 +149,39 @@ export default function Campaigns() {
       return metricsByCampaign;
     },
   });
+
+  // Calculate trend data for charts
+  const chartData = React.useMemo(() => {
+    if (!metricsSnapshots || metricsSnapshots.length === 0) return [];
+
+    const byDate = new Map<string, { revenue: number; profit: number; cost: number }>();
+    
+    for (const snapshot of metricsSnapshots) {
+      if (!snapshot.created_at) continue;
+      const date = format(new Date(snapshot.created_at), 'MM/dd');
+      const existing = byDate.get(date) || { revenue: 0, profit: 0, cost: 0 };
+      existing.revenue += Number(snapshot.revenue) || 0;
+      existing.profit += Number(snapshot.profit) || 0;
+      existing.cost += Number(snapshot.cost) || 0;
+      byDate.set(date, existing);
+    }
+
+    return Array.from(byDate.entries())
+      .map(([date, data]) => ({
+        date,
+        revenue: Math.round(data.revenue * 100) / 100,
+        profit: Math.round(data.profit * 100) / 100,
+        roi: data.cost > 0 ? Math.round(((data.revenue - data.cost) / data.cost) * 100 * 10) / 10 : 0,
+      }))
+      .reverse()
+      .slice(-7);
+  }, [metricsSnapshots]);
+
+  // Get last synced time
+  const lastSyncedTime = React.useMemo(() => {
+    if (!metricsSnapshots || metricsSnapshots.length === 0) return null;
+    return metricsSnapshots[0]?.created_at || null;
+  }, [metricsSnapshots]);
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -161,10 +211,27 @@ export default function Campaigns() {
   const sortedCampaigns = React.useMemo(() => {
     if (!campaigns) return [];
 
-    let filtered = campaigns.filter(c => 
-      c.name.toLowerCase().includes(search.toLowerCase()) ||
-      c.voluum_campaign_id.toLowerCase().includes(search.toLowerCase())
-    );
+    let filtered = campaigns.filter(c => {
+      // Search filter
+      const matchesSearch = c.name.toLowerCase().includes(search.toLowerCase()) ||
+        c.voluum_campaign_id.toLowerCase().includes(search.toLowerCase());
+      
+      // Status filter
+      const matchesStatus = statusFilter === 'all' || c.status_cache === statusFilter;
+      
+      // Profit filter
+      const metrics = getMetricsForCampaign(c.voluum_campaign_id);
+      const matchesProfit = profitFilter === 'all' ||
+        (profitFilter === 'positive' && metrics.profit > 0) ||
+        (profitFilter === 'negative' && metrics.profit <= 0);
+      
+      // ROI filter
+      const matchesRoi = roiFilter === 'all' ||
+        (roiFilter === 'positive' && metrics.roi > 0) ||
+        (roiFilter === 'negative' && metrics.roi <= 0);
+
+      return matchesSearch && matchesStatus && matchesProfit && matchesRoi;
+    });
 
     return filtered.sort((a, b) => {
       const metricsA = getMetricsForCampaign(a.voluum_campaign_id);
@@ -209,7 +276,7 @@ export default function Campaigns() {
         ? (valueA as number) - (valueB as number) 
         : (valueB as number) - (valueA as number);
     });
-  }, [campaigns, search, sortField, sortDirection, aggregatedMetrics]);
+  }, [campaigns, search, statusFilter, profitFilter, roiFilter, sortField, sortDirection, aggregatedMetrics]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -237,7 +304,10 @@ export default function Campaigns() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Campaigns</h1>
-          <p className="text-muted-foreground">Monitor and manage your campaigns</p>
+          <div className="flex items-center gap-3 mt-1">
+            <p className="text-muted-foreground">Monitor and manage your campaigns</p>
+            <LastSyncedBadge timestamp={lastSyncedTime} />
+          </div>
         </div>
         <div className="flex gap-2">
           <Button variant="default" size="sm" onClick={handleSync} disabled={syncing}>
@@ -247,6 +317,7 @@ export default function Campaigns() {
           <Button variant="outline" size="sm" onClick={() => {
             queryClient.invalidateQueries({ queryKey: ['campaigns'] });
             queryClient.invalidateQueries({ queryKey: ['aggregated-metrics'] });
+            queryClient.invalidateQueries({ queryKey: ['metrics-snapshots-campaigns'] });
           }}>
             <RefreshCw className="w-4 h-4 mr-2" />
             Refresh
@@ -254,22 +325,28 @@ export default function Campaigns() {
         </div>
       </div>
 
+      {/* Trend Chart */}
+      <MetricsTrendChart data={chartData} isLoading={loadingSnapshots} />
+
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2">
-              <Target className="w-5 h-5" />
-              All Campaigns
-            </CardTitle>
-            <div className="relative w-64">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                placeholder="Search campaigns..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-9"
-              />
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2">
+                <Target className="w-5 h-5" />
+                All Campaigns ({sortedCampaigns.length})
+              </CardTitle>
             </div>
+            <CampaignFilters
+              search={search}
+              onSearchChange={setSearch}
+              statusFilter={statusFilter}
+              onStatusFilterChange={setStatusFilter}
+              profitFilter={profitFilter}
+              onProfitFilterChange={setProfitFilter}
+              roiFilter={roiFilter}
+              onRoiFilterChange={setRoiFilter}
+            />
           </div>
         </CardHeader>
         <CardContent>
@@ -343,7 +420,9 @@ export default function Campaigns() {
               <Target className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
               <h3 className="text-lg font-medium mb-2">No campaigns found</h3>
               <p className="text-muted-foreground">
-                Campaigns will appear here once metrics are pulled from Voluum
+                {search || statusFilter !== 'all' || profitFilter !== 'all' || roiFilter !== 'all'
+                  ? 'Try adjusting your filters'
+                  : 'Campaigns will appear here once metrics are pulled from Voluum'}
               </p>
             </div>
           )}
