@@ -72,6 +72,7 @@ export default function Campaigns() {
 
   const { data: campaigns, isLoading: loadingCampaigns } = useQuery({
     queryKey: ['campaigns'],
+    refetchInterval: 5 * 60 * 1000, // Auto-refresh every 5 minutes
     queryFn: async () => {
       const { data, error } = await supabase
         .from('campaigns')
@@ -85,6 +86,7 @@ export default function Campaigns() {
 
   const { data: aggregatedMetrics, isLoading: loadingMetrics } = useQuery({
     queryKey: ['aggregated-metrics'],
+    refetchInterval: 5 * 60 * 1000, // Auto-refresh every 5 minutes
     queryFn: async () => {
       // Get all snapshots and aggregate by campaign
       const { data, error } = await supabase
