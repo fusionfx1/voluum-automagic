@@ -1,1 +1,7 @@
 project_id = "iicfdytpiylulctpicbq"
+
+[functions.voluum-test]
+verify_jwt = false
+
+[functions.voluum-sync]
+verify_jwt = false

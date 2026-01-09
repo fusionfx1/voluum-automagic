@@ -11,10 +11,12 @@ import {
   Target, 
   Zap,
   AlertTriangle,
-  RefreshCw
+  RefreshCw,
+  Download
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { formatDistanceToNow } from 'date-fns';
+import { toast } from 'sonner';
 
 interface MetricsSnapshot {
   id: string;
@@ -46,6 +48,8 @@ interface Rule {
 }
 
 export default function Overview() {
+  const [syncing, setSyncing] = React.useState(false);
+
   const { data: snapshots, isLoading: loadingSnapshots, refetch: refetchSnapshots } = useQuery({
     queryKey: ['metrics-snapshots-overview'],
     queryFn: async () => {
@@ -85,6 +89,29 @@ export default function Overview() {
       return data as Rule[];
     },
   });
+
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('voluum-sync');
+      
+      if (error) {
+        toast.error('Sync failed: ' + error.message);
+        return;
+      }
+
+      if (data?.success) {
+        toast.success(`Synced ${data.campaignsCount} campaigns, ${data.snapshotsInserted} snapshots`);
+        refetchSnapshots();
+      } else {
+        toast.error(data?.error || 'Sync failed');
+      }
+    } catch (err) {
+      toast.error('Failed to sync: ' + (err instanceof Error ? err.message : 'Unknown error'));
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   // Calculate aggregated metrics
   const aggregatedMetrics = React.useMemo(() => {
@@ -148,10 +175,16 @@ export default function Overview() {
           <h1 className="text-2xl font-bold">Dashboard Overview</h1>
           <p className="text-muted-foreground">Real-time campaign performance metrics</p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => refetchSnapshots()}>
-          <RefreshCw className="w-4 h-4 mr-2" />
-          Refresh
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="default" size="sm" onClick={handleSync} disabled={syncing}>
+            <Download className={`w-4 h-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
+            {syncing ? 'Syncing...' : 'Sync Voluum'}
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => refetchSnapshots()}>
+            <RefreshCw className="w-4 h-4 mr-2" />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Metrics Grid */}
