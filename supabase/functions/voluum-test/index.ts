@@ -155,8 +155,8 @@ serve(async (req) => {
     console.log('[voluum-test] Got session token successfully');
     console.log('[voluum-test] Token expires:', authData.expirationTimestamp);
 
-    // Test connection by fetching user info
-    const testUrl = `${voluumBaseUrl}/user`;
+    // Test connection by fetching campaigns (access keys can access this endpoint)
+    const testUrl = `${voluumBaseUrl}/campaign`;
     console.log('[voluum-test] Testing URL:', testUrl);
 
     const response = await fetch(testUrl, {
@@ -168,19 +168,19 @@ serve(async (req) => {
       }
     });
 
-    console.log('[voluum-test] User API response status:', response.status);
+    console.log('[voluum-test] Campaigns API response status:', response.status);
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('[voluum-test] User API error:', errorText);
+      console.error('[voluum-test] Campaigns API error:', errorText);
 
       return new Response(
         JSON.stringify({
           success: false,
-          error: 'Failed to fetch user info',
+          error: 'Failed to fetch campaigns',
           message: `Voluum API returned status ${response.status}`,
           details: errorText,
-          help: 'Authentication succeeded but user info fetch failed. This might be a permissions issue.',
+          help: 'Authentication succeeded but campaigns fetch failed. Check API permissions.',
           tokenObtained: true
         }),
         { 
@@ -191,19 +191,16 @@ serve(async (req) => {
     }
 
     // Parse successful response
-    const userData = await response.json();
-    console.log('[voluum-test] Success! User data received:', userData.email);
+    const campaignData = await response.json();
+    const campaignCount = campaignData.campaigns?.length || campaignData.totalRows || 0;
+    console.log('[voluum-test] Success! Campaigns count:', campaignCount);
 
     return new Response(
       JSON.stringify({
         success: true,
         message: 'Voluum API connection successful!',
-        user: {
-          email: userData.email,
-          firstName: userData.firstName,
-          lastName: userData.lastName,
-          timezone: userData.timezone,
-          workspaceId: userData.workspaceId
+        campaigns: {
+          count: campaignCount
         },
         session: {
           expiresAt: authData.expirationTimestamp,
