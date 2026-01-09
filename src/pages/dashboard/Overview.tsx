@@ -3,6 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { MetricCard } from '@/components/dashboard/MetricCard';
 import { StatusBadge } from '@/components/dashboard/StatusBadge';
+import { LastSyncedBadge } from '@/components/dashboard/LastSyncedBadge';
+import { MetricsTrendChart } from '@/components/dashboard/MetricsTrendChart';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { 
   DollarSign, 
@@ -12,10 +14,11 @@ import {
   Zap,
   AlertTriangle,
   RefreshCw,
-  Download
+  Download,
+  Play
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow, format } from 'date-fns';
 import { toast } from 'sonner';
 
 interface MetricsSnapshot {
@@ -49,23 +52,26 @@ interface Rule {
 
 export default function Overview() {
   const [syncing, setSyncing] = React.useState(false);
+  const [evaluating, setEvaluating] = React.useState(false);
 
   const { data: snapshots, isLoading: loadingSnapshots, refetch: refetchSnapshots } = useQuery({
     queryKey: ['metrics-snapshots-overview'],
+    refetchInterval: 5 * 60 * 1000, // Auto-refresh every 5 minutes
     queryFn: async () => {
       const { data, error } = await supabase
         .from('metrics_snapshots')
         .select('*')
         .order('created_at', { ascending: false })
-        .limit(100);
+        .limit(500);
       
       if (error) throw error;
       return data as MetricsSnapshot[];
     },
   });
 
-  const { data: triggers, isLoading: loadingTriggers } = useQuery({
+  const { data: triggers, isLoading: loadingTriggers, refetch: refetchTriggers } = useQuery({
     queryKey: ['rule-triggers-overview'],
+    refetchInterval: 5 * 60 * 1000,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('rule_triggers')
@@ -113,6 +119,33 @@ export default function Overview() {
     }
   };
 
+  const handleEvaluateRules = async () => {
+    setEvaluating(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('evaluate-rules');
+      
+      if (error) {
+        toast.error('Rule evaluation failed: ' + error.message);
+        return;
+      }
+
+      if (data?.success) {
+        if (data.triggersCreated > 0) {
+          toast.success(`${data.triggersCreated} rules triggered!`);
+        } else {
+          toast.info('No rules triggered');
+        }
+        refetchTriggers();
+      } else {
+        toast.error(data?.error || 'Rule evaluation failed');
+      }
+    } catch (err) {
+      toast.error('Failed to evaluate rules: ' + (err instanceof Error ? err.message : 'Unknown error'));
+    } finally {
+      setEvaluating(false);
+    }
+  };
+
   // Calculate aggregated metrics
   const aggregatedMetrics = React.useMemo(() => {
     if (!snapshots || snapshots.length === 0) {
@@ -149,6 +182,42 @@ export default function Overview() {
     };
   }, [snapshots]);
 
+  // Calculate trend data for charts
+  const chartData = React.useMemo(() => {
+    if (!snapshots || snapshots.length === 0) return [];
+
+    // Group snapshots by date
+    const byDate = new Map<string, { revenue: number; profit: number; cost: number }>();
+    
+    for (const snapshot of snapshots) {
+      const date = format(new Date(snapshot.created_at), 'MM/dd');
+      const existing = byDate.get(date) || { revenue: 0, profit: 0, cost: 0 };
+      existing.revenue += Number(snapshot.revenue) || 0;
+      existing.profit += Number(snapshot.profit) || 0;
+      existing.cost += Number(snapshot.cost) || 0;
+      byDate.set(date, existing);
+    }
+
+    // Convert to array and calculate ROI
+    const result = Array.from(byDate.entries())
+      .map(([date, data]) => ({
+        date,
+        revenue: Math.round(data.revenue * 100) / 100,
+        profit: Math.round(data.profit * 100) / 100,
+        roi: data.cost > 0 ? Math.round(((data.revenue - data.cost) / data.cost) * 100 * 10) / 10 : 0,
+      }))
+      .reverse()
+      .slice(-7); // Last 7 days
+
+    return result;
+  }, [snapshots]);
+
+  // Get last synced time
+  const lastSyncedTime = React.useMemo(() => {
+    if (!snapshots || snapshots.length === 0) return null;
+    return snapshots[0]?.created_at || null;
+  }, [snapshots]);
+
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -173,9 +242,16 @@ export default function Overview() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Dashboard Overview</h1>
-          <p className="text-muted-foreground">Real-time campaign performance metrics</p>
+          <div className="flex items-center gap-3 mt-1">
+            <p className="text-muted-foreground">Real-time campaign performance metrics</p>
+            <LastSyncedBadge timestamp={lastSyncedTime} />
+          </div>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={handleEvaluateRules} disabled={evaluating}>
+            <Play className={`w-4 h-4 mr-2 ${evaluating ? 'animate-spin' : ''}`} />
+            {evaluating ? 'Evaluating...' : 'Run Rules'}
+          </Button>
           <Button variant="default" size="sm" onClick={handleSync} disabled={syncing}>
             <Download className={`w-4 h-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
             {syncing ? 'Syncing...' : 'Sync Voluum'}
@@ -228,6 +304,9 @@ export default function Overview() {
           value={`${aggregatedMetrics.avgCvr.toFixed(2)}%`}
         />
       </div>
+
+      {/* Trend Chart */}
+      <MetricsTrendChart data={chartData} isLoading={loadingSnapshots} />
 
       {/* Recent Triggers */}
       <Card>

@@ -5,3 +5,9 @@ verify_jwt = false
 
 [functions.voluum-sync]
 verify_jwt = false
+
+[functions.evaluate-rules]
+verify_jwt = false
+
+[functions.line-notify]
+verify_jwt = false
