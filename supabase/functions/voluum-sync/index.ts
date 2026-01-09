@@ -171,8 +171,18 @@ serve(async (req) => {
     const now = new Date();
     now.setMinutes(0, 0, 0); // Round down to current hour
     const from = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const fromStr = from.toISOString().replace(/:\d{2}\.\d{3}Z$/, ':00:00Z');
-    const toStr = now.toISOString().replace(/:\d{2}\.\d{3}Z$/, ':00:00Z');
+    
+    // Format as ISO string with only hours (YYYY-MM-DDTHH:00:00Z)
+    const formatHour = (d: Date) => {
+      const year = d.getUTCFullYear();
+      const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(d.getUTCDate()).padStart(2, '0');
+      const hour = String(d.getUTCHours()).padStart(2, '0');
+      return `${year}-${month}-${day}T${hour}:00:00Z`;
+    };
+    
+    const fromStr = formatHour(from);
+    const toStr = formatHour(now);
 
     console.log('[voluum-sync] Fetching report from', fromStr, 'to', toStr);
     
