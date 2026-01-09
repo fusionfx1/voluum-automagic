@@ -167,11 +167,12 @@ serve(async (req) => {
     }
     console.log('[voluum-sync] Campaigns synced');
 
-    // Fetch report data (last 7 days)
+    // Fetch report data (last 7 days) - Voluum requires times rounded to the hour
     const now = new Date();
+    now.setMinutes(0, 0, 0); // Round down to current hour
     const from = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const fromStr = from.toISOString().replace(/\.\d{3}Z$/, 'Z');
-    const toStr = now.toISOString().replace(/\.\d{3}Z$/, 'Z');
+    const fromStr = from.toISOString().replace(/:\d{2}\.\d{3}Z$/, ':00:00Z');
+    const toStr = now.toISOString().replace(/:\d{2}\.\d{3}Z$/, ':00:00Z');
 
     console.log('[voluum-sync] Fetching report from', fromStr, 'to', toStr);
     
