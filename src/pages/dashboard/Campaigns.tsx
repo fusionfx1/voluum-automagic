@@ -55,27 +55,51 @@ export default function Campaigns() {
     },
   });
 
-  const { data: latestMetrics, isLoading: loadingMetrics } = useQuery({
-    queryKey: ['latest-metrics'],
+  const { data: aggregatedMetrics, isLoading: loadingMetrics } = useQuery({
+    queryKey: ['aggregated-metrics'],
     queryFn: async () => {
-      // Get the most recent snapshot for each campaign
+      // Get all snapshots and aggregate by campaign
       const { data, error } = await supabase
         .from('metrics_snapshots')
-        .select('voluum_campaign_id, clicks, conversions, cost, revenue, profit, roi, epc, cvr')
-        .order('created_at', { ascending: false })
-        .limit(500);
+        .select('voluum_campaign_id, clicks, conversions, cost, revenue, profit');
       
       if (error) throw error;
       
-      // Deduplicate to get latest per campaign
-      const latestByCampaign = new Map<string, MetricsSnapshot>();
-      for (const snapshot of data as MetricsSnapshot[]) {
-        if (!latestByCampaign.has(snapshot.voluum_campaign_id)) {
-          latestByCampaign.set(snapshot.voluum_campaign_id, snapshot);
+      // Aggregate metrics per campaign
+      const metricsByCampaign = new Map<string, MetricsSnapshot>();
+      for (const snapshot of data) {
+        const campaignId = snapshot.voluum_campaign_id;
+        const existing = metricsByCampaign.get(campaignId);
+        
+        if (existing) {
+          existing.clicks += Number(snapshot.clicks) || 0;
+          existing.conversions += Number(snapshot.conversions) || 0;
+          existing.cost += Number(snapshot.cost) || 0;
+          existing.revenue += Number(snapshot.revenue) || 0;
+          existing.profit += Number(snapshot.profit) || 0;
+        } else {
+          metricsByCampaign.set(campaignId, {
+            voluum_campaign_id: campaignId,
+            clicks: Number(snapshot.clicks) || 0,
+            conversions: Number(snapshot.conversions) || 0,
+            cost: Number(snapshot.cost) || 0,
+            revenue: Number(snapshot.revenue) || 0,
+            profit: Number(snapshot.profit) || 0,
+            roi: 0,
+            epc: 0,
+            cvr: 0,
+          });
         }
       }
       
-      return latestByCampaign;
+      // Calculate derived metrics
+      for (const [, metrics] of metricsByCampaign) {
+        metrics.roi = metrics.cost > 0 ? ((metrics.revenue - metrics.cost) / metrics.cost) * 100 : 0;
+        metrics.epc = metrics.clicks > 0 ? metrics.revenue / metrics.clicks : 0;
+        metrics.cvr = metrics.clicks > 0 ? (metrics.conversions / metrics.clicks) * 100 : 0;
+      }
+      
+      return metricsByCampaign;
     },
   });
 
@@ -92,7 +116,7 @@ export default function Campaigns() {
   };
 
   const getMetricsForCampaign = (campaignId: string) => {
-    return latestMetrics?.get(campaignId) || {
+    return aggregatedMetrics?.get(campaignId) || {
       clicks: 0,
       conversions: 0,
       cost: 0,
@@ -155,7 +179,7 @@ export default function Campaigns() {
         ? (valueA as number) - (valueB as number) 
         : (valueB as number) - (valueA as number);
     });
-  }, [campaigns, search, sortField, sortDirection, latestMetrics]);
+  }, [campaigns, search, sortField, sortDirection, aggregatedMetrics]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
