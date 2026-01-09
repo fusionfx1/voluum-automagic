@@ -36,24 +36,73 @@ serve(async (req) => {
       );
     }
 
-    // Parse the access key - format should be "accessId:accessKey"
-    if (!voluumAccessKey.includes(':')) {
+    // Parse the access key from the secret.
+    // Preferred format: "accessId:accessKey"
+    // Also accepts: two lines (accessId\naccessKey), whitespace-separated, JSON {accessId, accessKey}, or key/value pairs.
+    const parseVoluumAccessKey = (raw: string) => {
+      const s = raw.trim();
+      if (!s) return null;
+
+      if (s.includes(':')) {
+        const [id, ...rest] = s.split(':');
+        return { accessId: id.trim(), accessKey: rest.join(':').trim(), format: 'colon' };
+      }
+
+      if (s.includes('\n')) {
+        const parts = s.split(/\r?\n/).map((p) => p.trim()).filter(Boolean);
+        if (parts.length >= 2) return { accessId: parts[0], accessKey: parts[1], format: 'newline' };
+      }
+
+      if (/\s/.test(s)) {
+        const parts = s.split(/\s+/).map((p) => p.trim()).filter(Boolean);
+        if (parts.length >= 2) return { accessId: parts[0], accessKey: parts[1], format: 'whitespace' };
+      }
+
+      try {
+        const obj = JSON.parse(s);
+        if (obj && typeof obj.accessId === 'string' && typeof obj.accessKey === 'string') {
+          return { accessId: obj.accessId.trim(), accessKey: obj.accessKey.trim(), format: 'json' };
+        }
+      } catch {
+        // ignore
+      }
+
+      const idMatch = s.match(/accessId\s*[:=]\s*([^\s,;]+)/i);
+      const keyMatch = s.match(/accessKey\s*[:=]\s*([^\s,;]+)/i);
+      if (idMatch && keyMatch) {
+        return { accessId: idMatch[1].trim(), accessKey: keyMatch[1].trim(), format: 'kv' };
+      }
+
+      return null;
+    };
+
+    const parsed = parseVoluumAccessKey(voluumAccessKey);
+
+    if (!parsed?.accessId || !parsed?.accessKey) {
+      const trimmed = voluumAccessKey.trim();
       return new Response(
         JSON.stringify({
           success: false,
           error: 'Invalid VOLUUM_ACCESS_KEY format',
-          message: 'Access key must be in format: accessId:accessKey',
-          help: 'Example: 0ba3900f-9dd4-4d73-a4a3-aea436706576:RamijzQSm95LMDL9_yEIPsgadKyZKK130Ym9'
+          message: 'Access key must contain both accessId and accessKey',
+          help: 'Use format: accessId:accessKey (or put accessId on first line and accessKey on second line).',
+          diagnostics: {
+            hasColon: trimmed.includes(':'),
+            hasNewline: /\r?\n/.test(trimmed),
+            length: trimmed.length,
+          },
         }),
-        { 
-          status: 400, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         }
       );
     }
 
-    const [accessId, accessKey] = voluumAccessKey.split(':');
+    const { accessId, accessKey } = parsed;
+    console.log('[voluum-test] Parsed credentials format:', parsed.format);
     console.log('[voluum-test] Access ID:', accessId.slice(0, 8) + '...');
+
     
     // Authenticate to get session token
     // Per Voluum docs: POST to /auth/access/session with accessId and accessKey
