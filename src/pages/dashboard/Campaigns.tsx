@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -8,10 +8,12 @@ import {
   Search, 
   ArrowUpDown, 
   Target,
-  RefreshCw
+  RefreshCw,
+  Download
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { formatDistanceToNow } from 'date-fns';
+import { toast } from 'sonner';
 
 interface Campaign {
   id: string;
@@ -41,6 +43,32 @@ export default function Campaigns() {
   const [search, setSearch] = useState('');
   const [sortField, setSortField] = useState<SortField>('profit');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [syncing, setSyncing] = useState(false);
+  const queryClient = useQueryClient();
+
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('voluum-sync');
+      
+      if (error) {
+        toast.error('Sync failed: ' + error.message);
+        return;
+      }
+
+      if (data?.success) {
+        toast.success(`Synced ${data.campaignsCount} campaigns, ${data.snapshotsInserted} snapshots`);
+        queryClient.invalidateQueries({ queryKey: ['campaigns'] });
+        queryClient.invalidateQueries({ queryKey: ['aggregated-metrics'] });
+      } else {
+        toast.error(data?.error || 'Sync failed');
+      }
+    } catch (err) {
+      toast.error('Failed to sync: ' + (err instanceof Error ? err.message : 'Unknown error'));
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const { data: campaigns, isLoading: loadingCampaigns } = useQuery({
     queryKey: ['campaigns'],
@@ -208,6 +236,19 @@ export default function Campaigns() {
         <div>
           <h1 className="text-2xl font-bold">Campaigns</h1>
           <p className="text-muted-foreground">Monitor and manage your campaigns</p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="default" size="sm" onClick={handleSync} disabled={syncing}>
+            <Download className={`w-4 h-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
+            {syncing ? 'Syncing...' : 'Sync Voluum'}
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => {
+            queryClient.invalidateQueries({ queryKey: ['campaigns'] });
+            queryClient.invalidateQueries({ queryKey: ['aggregated-metrics'] });
+          }}>
+            <RefreshCw className="w-4 h-4 mr-2" />
+            Refresh
+          </Button>
         </div>
       </div>
 
